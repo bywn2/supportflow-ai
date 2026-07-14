@@ -292,3 +292,78 @@ function ConfidenceGauge({ value }: { value: number }) {
     </div>
   );
 }
+
+function contextRowsFor(category: string, ticketId: string): Array<{ label: string; value: string }> {
+  const seed = parseInt(ticketId.replace(/\D/g, ""), 10) || 0;
+  switch (category) {
+    case "refunds":
+      return [
+        { label: "Order", value: `A-${2800 + (seed % 200)}` },
+        { label: "Amount", value: money(45 + (seed % 6) * 15) },
+        { label: "Status", value: "delivered" },
+        { label: "Delivered", value: relTime(Date.now() - 4 * 86400000) },
+        { label: "Stripe charge", value: "ch_3M8Zp2…" },
+      ];
+    case "shipping":
+      return [
+        { label: "Order", value: `B-${1000 + (seed % 300)}` },
+        { label: "Carrier", value: "FedEx Ground" },
+        { label: "Tracking", value: "794658231014" },
+        { label: "Last scan", value: "Out for delivery · 4d ago" },
+        { label: "SLA", value: "Breached +2d" },
+      ];
+    case "billing":
+      return [
+        { label: "Customer", value: "cus_NqR8f2" },
+        { label: "Plan", value: "Enterprise" },
+        { label: "MRR", value: money(2400) },
+        { label: "Invoice", value: `inv_${8000 + (seed % 999)}` },
+        { label: "Charges (30d)", value: "6 · 1 duplicate" },
+      ];
+    case "account":
+      return [
+        { label: "User ID", value: "uid_442" },
+        { label: "IdP", value: "Okta" },
+        { label: "MFA", value: "Locked out" },
+        { label: "Last login", value: relTime(Date.now() - 6 * 86400000) },
+        { label: "Risk score", value: "0.12 · low" },
+      ];
+    case "technical":
+      return [
+        { label: "Service", value: "api-gateway" },
+        { label: "Tenant", value: "acme" },
+        { label: "Errors (1h)", value: "142" },
+        { label: "Runbook", value: "sso_okta_clock_skew" },
+        { label: "Incident", value: "inc_882" },
+      ];
+    default:
+      return [{ label: "Ticket", value: ticketId }];
+  }
+}
+
+function PipelineStrip({ steps, activeStatus }: { steps: typeof traces[string]["steps"]; activeStatus: string }) {
+  const activeIdx = activeStatus === "in_progress" ? steps.length - 2 : steps.length - 1;
+  return (
+    <div className="flex items-center gap-1 overflow-x-auto">
+      {steps.map((s, i) => {
+        const isActive = activeStatus === "in_progress" && i === activeIdx;
+        const isDone = activeStatus !== "in_progress" || i < activeIdx;
+        const tone =
+          s.status === "warn" ? "border-[oklch(0.78_0.15_75/0.5)] bg-[oklch(0.78_0.15_75/0.1)] text-[oklch(0.55_0.15_75)]"
+          : s.status === "error" ? "border-[oklch(0.6_0.22_15/0.5)] bg-[oklch(0.6_0.22_15/0.1)] text-[oklch(0.55_0.22_15)]"
+          : isDone ? "border-[oklch(0.6_0.16_155/0.4)] bg-[oklch(0.68_0.16_155/0.1)] text-[oklch(0.6_0.16_155)]"
+          : "border-border bg-muted/40 text-muted-foreground";
+        return (
+          <div key={i} className="flex items-center gap-1">
+            <div className={cn("flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium whitespace-nowrap", tone, isActive && "animate-pulse")}>
+              <span className="font-mono text-[10px] opacity-60">{i + 1}</span>
+              {s.agent.replace(" Agent", "")}
+            </div>
+            {i < steps.length - 1 && <span className="text-muted-foreground/40">→</span>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
