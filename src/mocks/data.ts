@@ -177,60 +177,211 @@ export const agents: AgentConf[] = [
   { id: "verifier", name: "Verifier Agent", role: "LLM-judge scoring the resolution vs. intent", icon: "CheckCheck", status: "healthy", model: "Claude Sonnet 4.5", version: "v2.1.0", callsToday: 168, avgLatencyMs: 210, successRate: 0.988, costToday: 0.34 },
 ];
 
+// ---------- Category-specific trace generation ----------
+// Each category produces a realistic Executor step sequence showing which
+// external tools (couriers, Stripe, IDP, etc.) the agent actually called.
+
+type Category = "refunds" | "shipping" | "billing" | "account" | "technical";
+
+interface ExecutorPlan {
+  planSummary: string;
+  planDetails: string[];
+  planOutput: unknown;
+  guardrailDetails: string[];
+  executorStatus: "ok" | "warn";
+  executorSummary: (escalated: boolean) => string;
+  executorDetails: string[];
+  executorOutput: unknown;
+  verifierSummary: string;
+  verifierDetails: string[];
+  outcome: (status: Ticket["status"]) => string;
+  retrievalDocs: string[];
+}
+
+function planFor(t: Ticket): ExecutorPlan {
+  const cat = t.category as Category;
+  const escalated = t.status === "escalated";
+
+  switch (cat) {
+    case "refunds":
+      return {
+        planSummary: "Plan: verify order → issue refund → notify customer",
+        planDetails: [
+          "shopify_mcp.get_order(order_id=A-2847)",
+          "stripe_mcp.create_refund(charge=ch_3M…, amount=4500)",
+          "zendesk_mcp.reply(template=refund_confirmed)",
+          "Within 30-day window · no prior refunds",
+        ],
+        planOutput: { steps: 3, tools: ["shopify.get_order", "stripe.create_refund", "zendesk.reply"] },
+        guardrailDetails: ["Refund amount $45 < $200 auto-limit", "Customer LTV verified", "No PII leak in draft reply"],
+        executorStatus: escalated ? "warn" : "ok",
+        executorSummary: (esc) => esc ? "Held: amount > policy threshold — sent for human approval" : "Refund re_1MnZaX ($45.00) succeeded · reply sent",
+        executorDetails: [
+          "→ shopify_mcp.get_order  ✓ 142ms  status=delivered",
+          "→ stripe_mcp.create_refund  ✓ 480ms  refund_id=re_1MnZaX",
+          "→ zendesk_mcp.reply  ✓ 210ms  message_id=msg_88a2",
+        ],
+        executorOutput: { refund_id: "re_1MnZaX", amount: 45, currency: "USD", status: "succeeded" },
+        verifierSummary: "Judge 9.2/10 · refund amount, tone, and policy match intent",
+        verifierDetails: ["Refund amount matches order total", "Tone: empathetic", "Cited: refund_policy_v2"],
+        outcome: (s) => s === "resolved" ? "Refunded $45.00 to card ••4242" : s === "escalated" ? "Escalated: awaiting human approval" : "Refund in progress",
+        retrievalDocs: ["refund_policy_v2", "high_value_refund_matrix", "order_A-2847"],
+      };
+
+    case "shipping":
+      return {
+        planSummary: "Plan: check courier tracking → decide reship / refund → update customer",
+        planDetails: [
+          "shopify_mcp.get_order(order_id=B-1092)",
+          "aftership_mcp.track(carrier=fedex, tracking=794658…)",
+          "If lost > SLA+3d → shopify_mcp.create_reship  else  courier_dispute",
+        ],
+        planOutput: { branch: "lost_in_transit", tools: ["aftership.track", "shopify.create_reship"] },
+        guardrailDetails: ["Reship value ($68) < $500 auto-limit", "Address unchanged", "No duplicate reship in 30d"],
+        executorStatus: escalated ? "warn" : "ok",
+        executorSummary: (esc) => esc ? "Escalated: courier shows delivered but customer denies receipt" : "Reship scheduled · FedEx pickup tomorrow · ETA 3 days",
+        executorDetails: [
+          "→ aftership_mcp.track  ✓ 310ms  last_scan=out_for_delivery 4d ago",
+          "→ fedex_mcp.claim_lost_package  ✓ 620ms  claim_id=CLM-88213",
+          "→ shopify_mcp.create_reship  ✓ 440ms  order_id=B-1092-R",
+          "→ zendesk_mcp.reply  ✓ 190ms  template=lost_package_reship",
+        ],
+        executorOutput: { claim_id: "CLM-88213", reship_order: "B-1092-R", eta: "2026-07-17", carrier: "FedEx" },
+        verifierSummary: "Judge 9.0/10 · action matches lost-package SLA policy",
+        verifierDetails: ["Correct branch chosen (lost > SLA)", "Reship free of charge", "ETA communicated to customer"],
+        outcome: (s) => s === "resolved" ? "Reship created (B-1092-R) · ETA 3 days" : s === "escalated" ? "Escalated: courier delivery dispute" : "Tracking courier",
+        retrievalDocs: ["shipping_sla_v3", "lost_package_remediation", "order_B-1092", "aftership_scan_history"],
+      };
+
+    case "billing":
+      return {
+        planSummary: "Plan: reconcile charges in Stripe → reverse duplicate → issue credit note",
+        planDetails: [
+          "stripe_mcp.list_charges(customer=cus_NqR…, since=2026-11-01)",
+          "Detect duplicate: charge ch_A and ch_B same amount within 60s",
+          "stripe_mcp.refund(ch_B) + billing_mcp.credit_note",
+        ],
+        planOutput: { duplicate_charges: ["ch_A", "ch_B"], action: "refund_ch_B" },
+        guardrailDetails: ["Amount $129 < $500 auto-limit", "Same customer/card confirmed", "No prior reversal this cycle"],
+        executorStatus: escalated ? "warn" : "ok",
+        executorSummary: (esc) => esc ? "Held: seat-count mismatch requires finance review" : "Duplicate charge reversed · credit note CN-4429 sent",
+        executorDetails: [
+          "→ stripe_mcp.list_charges  ✓ 260ms  found=6 duplicates=1",
+          "→ stripe_mcp.refund  ✓ 510ms  refund_id=re_88Zp",
+          "→ billing_mcp.issue_credit_note  ✓ 300ms  cn_id=CN-4429",
+          "→ email_mcp.send  ✓ 180ms  template=duplicate_reversed",
+        ],
+        executorOutput: { refunded: 129, credit_note: "CN-4429", stripe_refund: "re_88Zp" },
+        verifierSummary: "Judge 9.4/10 · duplicate correctly identified and reversed",
+        verifierDetails: ["Both charges within duplicate window", "Correct charge reversed (later one)", "Credit note references original invoice"],
+        outcome: (s) => s === "resolved" ? "Reversed $129 · credit note CN-4429" : s === "escalated" ? "Escalated to finance" : "Reconciling charges",
+        retrievalDocs: ["duplicate_charge_reversal", "invoice_correction_workflow", "stripe_charges_cus_NqR"],
+      };
+
+    case "account":
+      return {
+        planSummary: "Plan: verify identity → run privileged account action → audit",
+        planDetails: [
+          "auth_mcp.verify_identity(method=email_challenge)",
+          "okta_mcp.reset_mfa(user=uid_442)  |  gdpr_mcp.enqueue_deletion",
+          "audit_mcp.write(actor=agent, action=…)",
+        ],
+        planOutput: { requires_verification: true, tool: "okta.reset_mfa" },
+        guardrailDetails: ["Identity challenge passed", "24h MFA cool-down enforced", "PII scrubbed from logs"],
+        executorStatus: escalated ? "warn" : "ok",
+        executorSummary: (esc) => esc ? "Held: second-factor challenge failed — flagged for security review" : "MFA reset · recovery email dispatched · audit written",
+        executorDetails: [
+          "→ auth_mcp.send_challenge  ✓ 180ms  challenge_id=ch_88",
+          "→ auth_mcp.verify_challenge  ✓ 240ms  verified=true",
+          "→ okta_mcp.reset_mfa  ✓ 620ms  user=uid_442",
+          "→ audit_mcp.write  ✓ 90ms  event_id=evt_9931",
+        ],
+        executorOutput: { action: "mfa_reset", user: "uid_442", audit_id: "evt_9931" },
+        verifierSummary: "Judge 9.1/10 · identity verified before privileged action",
+        verifierDetails: ["Challenge completed before reset", "Cool-down policy respected", "Audit event written with hash"],
+        outcome: (s) => s === "resolved" ? "MFA reset · user notified" : s === "escalated" ? "Escalated: security review" : "Verifying identity",
+        retrievalDocs: ["mfa_recovery_flow", "gdpr_data_deletion", "account_merge_procedure"],
+      };
+
+    case "technical":
+      return {
+        planSummary: "Plan: pull diagnostics → correlate errors → apply fix or file ticket",
+        planDetails: [
+          "datadog_mcp.query(service=api, window=1h, filter=tenant:acme)",
+          "github_mcp.search_issues(label=sso)",
+          "If known → apply runbook  else  linear_mcp.create_bug",
+        ],
+        planOutput: { matched_runbook: "sso_okta_clock_skew", confidence: 0.87 },
+        guardrailDetails: ["Read-only tools only", "No config change without human approval", "Rate limit within tier"],
+        executorStatus: escalated ? "warn" : "ok",
+        executorSummary: (esc) => esc ? "Held: config change requires human — draft PR opened" : "Runbook applied · SSO clock skew resolved · monitoring 15m",
+        executorDetails: [
+          "→ datadog_mcp.query  ✓ 480ms  errors=142 pattern=SAMLResponse expired",
+          "→ github_mcp.search_issues  ✓ 320ms  hit=#2214 (resolved)",
+          "→ runbook_mcp.execute(sso_okta_clock_skew)  ✓ 910ms  ntp_sync=ok",
+          "→ statuspage_mcp.post_update  ✓ 210ms  incident=inc_882",
+        ],
+        executorOutput: { runbook: "sso_okta_clock_skew", errors_before: 142, errors_after: 0, incident: "inc_882" },
+        verifierSummary: "Judge 8.9/10 · fix matches diagnosed root cause",
+        verifierDetails: ["Runbook matched diagnostic pattern", "Post-fix error rate = 0", "Customer + status page notified"],
+        outcome: (s) => s === "resolved" ? "SSO restored · 0 errors last 15m" : s === "escalated" ? "Escalated: config change PR opened" : "Diagnosing",
+        retrievalDocs: ["sso_troubleshooting_runbook", "api_rate_limit_tiers", "github_issue_2214"],
+      };
+  }
+}
+
 export const traces: Record<string, Trace> = Object.fromEntries(
-  tickets.map((t) => [
-    t.id,
-    {
-      ticketId: t.id,
-      outcome: t.status === "resolved" ? "Refunded $45.00" : t.status === "escalated" ? "Escalated to human" : "In progress",
-      steps: [
-        {
-          agent: "Intake Agent", agentId: "intake", status: "ok", durationMs: 240, costUsd: 0.001,
-          summary: `Classification: ${t.category}_request  •  Confidence: ${Math.round(t.confidence * 100)}%`,
-          details: ["PII detected: email (redacted)", "Language: en", `Priority estimate: ${t.priority}`],
-          io: { input: { subject: t.subject, body: t.message }, output: { category: t.category, priority: t.priority, confidence: t.confidence } },
-        },
-        {
-          agent: "Retrieval Agent", agentId: "retrieval", status: "ok", durationMs: 380, costUsd: 0.002,
-          summary: "Retrieved 3 policies  •  Reranker score: 0.89",
-          details: ["refund_policy_v2", "escalation_matrix", "order_lookup_result"],
-          io: { input: { query: t.subject }, output: { docs: ["refund_policy_v2", "escalation_matrix", "order_lookup_result"], score: 0.89 } },
-        },
-        {
-          agent: "Planner Agent", agentId: "planner", status: "ok", durationMs: 620, costUsd: 0.008,
-          summary: "Plan drafted  •  Confidence: 92%",
-          details: [
-            "refund_order(order_id=A-2847, amount=45.00)",
-            "Customer within 30-day window",
-            "Order status: delivered, no previous refunds",
-          ],
-          io: { input: { context: "..." }, output: { plan: [{ tool: "stripe.create_refund", args: { order_id: "A-2847", amount: 45 } }] } },
-        },
-        {
-          agent: "Guardrail Agent", agentId: "guardrail", status: "ok", durationMs: 180, costUsd: 0.001,
-          summary: "All checks passed",
-          details: ["Prompt injection: safe", "Action allowlist: ok", "Amount limit ($200): ok"],
-          io: { input: { plan: "..." }, output: { allowed: true, checks: { pi: "safe", allowlist: "ok", amount: "ok" } } },
-        },
-        {
-          agent: "Executor Agent", agentId: "executor", status: t.status === "escalated" ? "warn" : "ok", durationMs: 890, costUsd: 0.003,
-          summary: t.status === "escalated" ? "Escalated: manual approval required" : "Refund created: re_1MnZ... ($45.00)",
-          details: [
-            "stripe_mcp.create_refund → succeeded",
-            "zendesk_mcp.update_ticket → status: resolved",
-          ],
-          io: { input: { calls: 2 }, output: { refund_id: "re_1MnZaXQnR2", amount: 45, status: "succeeded" } },
-        },
-        {
-          agent: "Verifier Agent", agentId: "verifier", status: "ok", durationMs: 210, costUsd: 0.002,
-          summary: "LLM judge score: 9.2/10  •  Outcome matches intent",
-          details: ["Refund amount correct", "Customer notified", "No policy violations"],
-          io: { input: { outcome: "refunded" }, output: { score: 9.2, verdict: "pass" } },
-        },
-      ],
-    },
-  ]),
+  tickets.map((t) => {
+    const p = planFor(t);
+    const escalated = t.status === "escalated";
+    return [
+      t.id,
+      {
+        ticketId: t.id,
+        outcome: p.outcome(t.status),
+        steps: [
+          {
+            agent: "Intake Agent", agentId: "intake", status: "ok", durationMs: 240, costUsd: 0.001,
+            summary: `Classified as ${t.category}_request · ${Math.round(t.confidence * 100)}% confidence`,
+            details: ["PII detected: email (redacted)", "Language: en", `Priority estimate: ${t.priority}`, `Routed to: ${t.category} specialist chain`],
+            io: { input: { subject: t.subject, body: t.message }, output: { category: t.category, priority: t.priority, confidence: t.confidence } },
+          },
+          {
+            agent: "Retrieval Agent", agentId: "retrieval", status: "ok", durationMs: 380, costUsd: 0.002,
+            summary: `Retrieved ${p.retrievalDocs.length} sources · reranker 0.89`,
+            details: p.retrievalDocs,
+            io: { input: { query: t.subject, category: t.category }, output: { docs: p.retrievalDocs, score: 0.89 } },
+          },
+          {
+            agent: "Planner Agent", agentId: "planner", status: "ok", durationMs: 620, costUsd: 0.008,
+            summary: p.planSummary,
+            details: p.planDetails,
+            io: { input: { context: "retrieved+ticket" }, output: p.planOutput },
+          },
+          {
+            agent: "Guardrail Agent", agentId: "guardrail", status: escalated ? "warn" : "ok", durationMs: 180, costUsd: 0.001,
+            summary: escalated ? "Policy threshold hit — escalation required" : "All checks passed",
+            details: p.guardrailDetails,
+            io: { input: { plan: "…" }, output: { allowed: !escalated, checks: p.guardrailDetails } },
+          },
+          {
+            agent: "Executor Agent", agentId: "executor", status: p.executorStatus, durationMs: 890, costUsd: 0.003,
+            summary: p.executorSummary(escalated),
+            details: p.executorDetails,
+            io: { input: { plan: p.planOutput }, output: p.executorOutput },
+          },
+          {
+            agent: "Verifier Agent", agentId: "verifier", status: "ok", durationMs: 210, costUsd: 0.002,
+            summary: p.verifierSummary,
+            details: p.verifierDetails,
+            io: { input: { outcome: p.executorOutput }, output: { score: 9.1, verdict: escalated ? "hold" : "pass" } },
+          },
+        ],
+      },
+    ];
+  }),
 );
+
 
 export const policies: Policy[] = [
   { id: "p_01", title: "Refund policy v2", category: "Refunds", status: "active", updatedAt: new Date(now - 3 * 86400000).toISOString(), usedByAgents: 4, excerpt: "Full refund within 30 days of delivery for undamaged items." },
