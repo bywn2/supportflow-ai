@@ -31,8 +31,8 @@ export function Sidebar() {
       )}
     >
       <div className="flex h-14 items-center gap-2 border-b border-sidebar-border px-4">
-        <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
-          <Sparkles className="h-4 w-4" />
+        <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground text-[11px] font-bold tracking-tight">
+          SI
         </div>
         {!collapsed && (
           <div className="min-w-0">
