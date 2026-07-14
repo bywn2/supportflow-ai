@@ -220,7 +220,7 @@ function TicketDetail() {
   );
 }
 
-function TraceStep({ step, index }: { step: typeof traces[string]["steps"][number]; index: number }) {
+function TraceStep({ step, index, isActive = false }: { step: typeof traces[string]["steps"][number]; index: number; isActive?: boolean }) {
   const [open, setOpen] = useState(false);
   const Icon = step.status === "ok" ? CheckCircle2 : step.status === "warn" ? AlertTriangle : XCircle;
   const color = step.status === "ok" ? "text-[oklch(0.6_0.16_155)] bg-[oklch(0.68_0.16_155/0.15)]"
@@ -231,9 +231,14 @@ function TraceStep({ step, index }: { step: typeof traces[string]["steps"][numbe
     <motion.div initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: index * 0.03 }}>
       <Collapsible open={open} onOpenChange={setOpen}>
         <div className="relative pl-8">
-          <div className={cn("absolute left-0 top-1 flex h-[18px] w-[18px] items-center justify-center rounded-full ring-4 ring-background", color)}>
+          <div className={cn("absolute left-0 top-1 flex h-[18px] w-[18px] items-center justify-center rounded-full ring-4 ring-background", color, isActive && "animate-pulse")}>
             <Icon className="h-3 w-3" />
           </div>
+          {isActive && (
+            <span className="ml-2 inline-flex items-center rounded border border-[oklch(0.6_0.16_155/0.4)] bg-[oklch(0.68_0.16_155/0.1)] px-1.5 py-0.5 text-[10px] font-medium text-[oklch(0.6_0.16_155)]">
+              running now
+            </span>
+          )}
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
