@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Sparkles, ArrowRight } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/login")({
@@ -27,8 +27,8 @@ function Login() {
       <div className="flex items-center justify-center bg-background px-6 py-12">
         <div className="w-full max-w-sm">
           <div className="mb-8 flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
-              <Sparkles className="h-4 w-4" />
+            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground text-xs font-bold tracking-tight">
+              SI
             </div>
             <span className="text-base font-semibold tracking-tight">SupportOps AI</span>
           </div>
