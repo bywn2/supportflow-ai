@@ -100,12 +100,14 @@ function TicketDetail() {
           </Card>
 
           <Card className="p-4">
-            <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Order context</h4>
+            <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Context</h4>
             <div className="space-y-1 text-xs">
-              <div className="flex justify-between"><span className="text-muted-foreground">Order</span><span className="font-mono">A-2847</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Amount</span><span>{money(45)}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Status</span><span>delivered</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Delivered</span><span>{relTime(Date.now() - 4 * 86400000)}</span></div>
+              {contextRowsFor(t.category, t.id).map((r) => (
+                <div key={r.label} className="flex justify-between gap-2">
+                  <span className="text-muted-foreground">{r.label}</span>
+                  <span className="truncate font-mono text-right">{r.value}</span>
+                </div>
+              ))}
             </div>
           </Card>
         </div>
@@ -124,6 +126,22 @@ function TicketDetail() {
           </Card>
 
           <Card className="p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-sm font-semibold">Agent pipeline</h3>
+              {t.status === "in_progress" && (
+                <span className="flex items-center gap-1.5 text-[11px] text-[oklch(0.6_0.16_155)]">
+                  <span className="relative flex h-2 w-2">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[oklch(0.6_0.16_155)] opacity-60" />
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-[oklch(0.6_0.16_155)]" />
+                  </span>
+                  Live — Executor running
+                </span>
+              )}
+            </div>
+            <PipelineStrip steps={trace.steps} activeStatus={t.status} />
+          </Card>
+
+          <Card className="p-4">
             <div className="mb-4 flex items-center justify-between">
               <h3 className="text-sm font-semibold">Agent trace</h3>
               <div className="text-xs text-muted-foreground">
@@ -135,11 +153,12 @@ function TicketDetail() {
               <div className="absolute left-[9px] top-2 bottom-2 w-px bg-border" />
               <div className="space-y-3">
                 {trace.steps.map((s, i) => (
-                  <TraceStep key={i} step={s} index={i} />
+                  <TraceStep key={i} step={s} index={i} isActive={t.status === "in_progress" && i === trace.steps.length - 2} />
                 ))}
               </div>
             </div>
           </Card>
+
         </div>
 
         {/* RIGHT */}
@@ -201,7 +220,7 @@ function TicketDetail() {
   );
 }
 
-function TraceStep({ step, index }: { step: typeof traces[string]["steps"][number]; index: number }) {
+function TraceStep({ step, index, isActive = false }: { step: typeof traces[string]["steps"][number]; index: number; isActive?: boolean }) {
   const [open, setOpen] = useState(false);
   const Icon = step.status === "ok" ? CheckCircle2 : step.status === "warn" ? AlertTriangle : XCircle;
   const color = step.status === "ok" ? "text-[oklch(0.6_0.16_155)] bg-[oklch(0.68_0.16_155/0.15)]"
@@ -212,9 +231,14 @@ function TraceStep({ step, index }: { step: typeof traces[string]["steps"][numbe
     <motion.div initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: index * 0.03 }}>
       <Collapsible open={open} onOpenChange={setOpen}>
         <div className="relative pl-8">
-          <div className={cn("absolute left-0 top-1 flex h-[18px] w-[18px] items-center justify-center rounded-full ring-4 ring-background", color)}>
+          <div className={cn("absolute left-0 top-1 flex h-[18px] w-[18px] items-center justify-center rounded-full ring-4 ring-background", color, isActive && "animate-pulse")}>
             <Icon className="h-3 w-3" />
           </div>
+          {isActive && (
+            <span className="ml-2 inline-flex items-center rounded border border-[oklch(0.6_0.16_155/0.4)] bg-[oklch(0.68_0.16_155/0.1)] px-1.5 py-0.5 text-[10px] font-medium text-[oklch(0.6_0.16_155)]">
+              running now
+            </span>
+          )}
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
@@ -268,3 +292,78 @@ function ConfidenceGauge({ value }: { value: number }) {
     </div>
   );
 }
+
+function contextRowsFor(category: string, ticketId: string): Array<{ label: string; value: string }> {
+  const seed = parseInt(ticketId.replace(/\D/g, ""), 10) || 0;
+  switch (category) {
+    case "refunds":
+      return [
+        { label: "Order", value: `A-${2800 + (seed % 200)}` },
+        { label: "Amount", value: money(45 + (seed % 6) * 15) },
+        { label: "Status", value: "delivered" },
+        { label: "Delivered", value: relTime(Date.now() - 4 * 86400000) },
+        { label: "Stripe charge", value: "ch_3M8Zp2…" },
+      ];
+    case "shipping":
+      return [
+        { label: "Order", value: `B-${1000 + (seed % 300)}` },
+        { label: "Carrier", value: "FedEx Ground" },
+        { label: "Tracking", value: "794658231014" },
+        { label: "Last scan", value: "Out for delivery · 4d ago" },
+        { label: "SLA", value: "Breached +2d" },
+      ];
+    case "billing":
+      return [
+        { label: "Customer", value: "cus_NqR8f2" },
+        { label: "Plan", value: "Enterprise" },
+        { label: "MRR", value: money(2400) },
+        { label: "Invoice", value: `inv_${8000 + (seed % 999)}` },
+        { label: "Charges (30d)", value: "6 · 1 duplicate" },
+      ];
+    case "account":
+      return [
+        { label: "User ID", value: "uid_442" },
+        { label: "IdP", value: "Okta" },
+        { label: "MFA", value: "Locked out" },
+        { label: "Last login", value: relTime(Date.now() - 6 * 86400000) },
+        { label: "Risk score", value: "0.12 · low" },
+      ];
+    case "technical":
+      return [
+        { label: "Service", value: "api-gateway" },
+        { label: "Tenant", value: "acme" },
+        { label: "Errors (1h)", value: "142" },
+        { label: "Runbook", value: "sso_okta_clock_skew" },
+        { label: "Incident", value: "inc_882" },
+      ];
+    default:
+      return [{ label: "Ticket", value: ticketId }];
+  }
+}
+
+function PipelineStrip({ steps, activeStatus }: { steps: typeof traces[string]["steps"]; activeStatus: string }) {
+  const activeIdx = activeStatus === "in_progress" ? steps.length - 2 : steps.length - 1;
+  return (
+    <div className="flex items-center gap-1 overflow-x-auto">
+      {steps.map((s, i) => {
+        const isActive = activeStatus === "in_progress" && i === activeIdx;
+        const isDone = activeStatus !== "in_progress" || i < activeIdx;
+        const tone =
+          s.status === "warn" ? "border-[oklch(0.78_0.15_75/0.5)] bg-[oklch(0.78_0.15_75/0.1)] text-[oklch(0.55_0.15_75)]"
+          : s.status === "error" ? "border-[oklch(0.6_0.22_15/0.5)] bg-[oklch(0.6_0.22_15/0.1)] text-[oklch(0.55_0.22_15)]"
+          : isDone ? "border-[oklch(0.6_0.16_155/0.4)] bg-[oklch(0.68_0.16_155/0.1)] text-[oklch(0.6_0.16_155)]"
+          : "border-border bg-muted/40 text-muted-foreground";
+        return (
+          <div key={i} className="flex items-center gap-1">
+            <div className={cn("flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium whitespace-nowrap", tone, isActive && "animate-pulse")}>
+              <span className="font-mono text-[10px] opacity-60">{i + 1}</span>
+              {s.agent.replace(" Agent", "")}
+            </div>
+            {i < steps.length - 1 && <span className="text-muted-foreground/40">→</span>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
