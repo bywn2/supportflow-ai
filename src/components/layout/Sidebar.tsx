@@ -1,5 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { LayoutDashboard, Ticket, AlertTriangle, Bot, BookOpen, FlaskConical, BarChart3, ScrollText, Settings, Plug, Sparkles } from "lucide-react";
+import { LayoutDashboard, Ticket, AlertTriangle, Bot, BookOpen, FlaskConical, BarChart3, ScrollText, Settings, Plug } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUI } from "@/store/ui";
 
