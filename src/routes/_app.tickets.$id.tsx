@@ -100,12 +100,14 @@ function TicketDetail() {
           </Card>
 
           <Card className="p-4">
-            <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Order context</h4>
+            <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Context</h4>
             <div className="space-y-1 text-xs">
-              <div className="flex justify-between"><span className="text-muted-foreground">Order</span><span className="font-mono">A-2847</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Amount</span><span>{money(45)}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Status</span><span>delivered</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Delivered</span><span>{relTime(Date.now() - 4 * 86400000)}</span></div>
+              {contextRowsFor(t.category, t.id).map((r) => (
+                <div key={r.label} className="flex justify-between gap-2">
+                  <span className="text-muted-foreground">{r.label}</span>
+                  <span className="truncate font-mono text-right">{r.value}</span>
+                </div>
+              ))}
             </div>
           </Card>
         </div>
@@ -124,6 +126,22 @@ function TicketDetail() {
           </Card>
 
           <Card className="p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-sm font-semibold">Agent pipeline</h3>
+              {t.status === "in_progress" && (
+                <span className="flex items-center gap-1.5 text-[11px] text-[oklch(0.6_0.16_155)]">
+                  <span className="relative flex h-2 w-2">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[oklch(0.6_0.16_155)] opacity-60" />
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-[oklch(0.6_0.16_155)]" />
+                  </span>
+                  Live — Executor running
+                </span>
+              )}
+            </div>
+            <PipelineStrip steps={trace.steps} activeStatus={t.status} />
+          </Card>
+
+          <Card className="p-4">
             <div className="mb-4 flex items-center justify-between">
               <h3 className="text-sm font-semibold">Agent trace</h3>
               <div className="text-xs text-muted-foreground">
@@ -135,11 +153,12 @@ function TicketDetail() {
               <div className="absolute left-[9px] top-2 bottom-2 w-px bg-border" />
               <div className="space-y-3">
                 {trace.steps.map((s, i) => (
-                  <TraceStep key={i} step={s} index={i} />
+                  <TraceStep key={i} step={s} index={i} isActive={t.status === "in_progress" && i === trace.steps.length - 2} />
                 ))}
               </div>
             </div>
           </Card>
+
         </div>
 
         {/* RIGHT */}
